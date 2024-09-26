@@ -1,0 +1,8 @@
+[package]
+name = "NewChess"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.14.2"
+viering-chess = { git = "https://github.com/INDA24PlusPlus/viering-chess.git" }
