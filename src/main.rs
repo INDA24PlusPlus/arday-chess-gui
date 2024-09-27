@@ -1,5 +1,7 @@
+use std::any::Any;
+use std::sync::RwLockWriteGuard;
+
 use bevy::prelude::*;
-use bevy::transform::commands;
 use bevy::window::PrimaryWindow;
 use viering_chess::*;
 
@@ -7,13 +9,22 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (spawn_board, draw_board, spawn_camera))
-        .add_systems(Update, spawn_pieces)
+        .add_systems(
+            Update,
+            (spawn_pieces, handle_piece_selection, despawn_all_entities),
+        )
         .run();
 }
-
 #[derive(Component)]
 pub struct Board {
     pieces: Vec<Vec<char>>,
+    game: Game,
+    possible_moves: Vec<Position>,
+}
+
+#[derive(Component)]
+pub struct ActivePiece {
+    position: Vec<usize>,
 }
 
 pub fn get_piece_position(rank: usize, file: usize) -> Transform {
@@ -26,7 +37,6 @@ pub fn get_piece_position(rank: usize, file: usize) -> Transform {
         (baseY - ((file as f64) * horizontal_spacing)) as f32,
         0.,
     )
-    .with_scale(Vec3::new(1.6, 1.6, 0.))
 }
 
 pub fn spawn_board(mut commands: Commands) {
@@ -44,7 +54,11 @@ pub fn spawn_board(mut commands: Commands) {
     board.push(Vec::from(['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P']));
     board.push(Vec::from(['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']));
 
-    commands.spawn(Board { pieces: board });
+    commands.spawn(Board {
+        pieces: board,
+        game,
+        possible_moves: Vec::new(),
+    });
 }
 
 pub fn draw_board(
@@ -70,9 +84,7 @@ pub fn spawn_pieces(
     asset_server: Res<AssetServer>,
 ) {
     if let Ok(board) = board_query.get_single() {
-        println!("has");
         for rank in 0..8 {
-            println!("Run");
             for row in 0..8 {
                 let piece = board.pieces[rank][row];
 
@@ -92,12 +104,33 @@ pub fn spawn_pieces(
                     _ => "",
                 };
 
-                if piece != '-' {
+                let mut possible_move = Position::new(0, 0);
+                let mut found = false;
+
+                for current_move in &board.possible_moves {
+                    if (rank == (current_move.y as usize) && row == (current_move.x as usize)) {
+                        possible_move = Position::new(current_move.x, current_move.y);
+                        found = true;
+
+                        break;
+                    }
+                }
+
+                if piece != '-' && found == false {
                     commands.spawn((SpriteBundle {
-                        transform: get_piece_position(row, rank),
+                        transform: get_piece_position(row, rank)
+                            .with_scale(Vec3::new(1.6, 1.6, 0.)),
                         texture: asset_server.load(imgPath),
                         ..default()
                     },));
+                } else if (found == true) {
+                    commands
+                        .spawn((SpriteBundle {
+                            transform: get_piece_position(row, rank),
+                            texture: asset_server.load("Dot.png"),
+                            ..default()
+                        },))
+                        .insert(Name::new("dot"));
                 }
             }
         }
@@ -111,4 +144,40 @@ pub fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<Pr
         transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 0.),
         ..default()
     });
+}
+
+pub fn get_position_from_click(position: Vec2) -> Vec<usize> {
+    let mut newVec = Vec::new();
+
+    newVec.push(((position[0] as usize) - 305) / 83);
+    newVec.push(((position[1] as usize) - 25) / 83);
+
+    newVec
+}
+
+pub fn handle_piece_selection(
+    input: Res<ButtonInput<MouseButton>>,
+    mut board_query: Query<&mut Board>,
+    window_query: Query<&Window>,
+    time: Res<Time>,
+) {
+    if let Ok(mut board) = board_query.get_single_mut() {
+        if input.just_pressed(MouseButton::Left) {
+            let window = window_query.get_single().unwrap();
+
+            let position = get_position_from_click(window.cursor_position().unwrap());
+
+            let moves: Vec<Position> = board
+                .game
+                .get_possible_moves(Position::new(position[0] as u8, position[1] as u8));
+
+            board.possible_moves = moves;
+        }
+    }
+}
+
+fn despawn_all_entities(mut commands: Commands, query: Query<Entity, With<Name>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
 }
